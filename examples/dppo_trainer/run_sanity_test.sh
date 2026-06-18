@@ -32,7 +32,7 @@ ROLLOUT_GPU_MEM_UTIL=${ROLLOUT_GPU_MEM_UTIL:-0.6}
 ROLLOUT_N=${ROLLOUT_N:-1}
 ROLLOUT_VAL_N=${ROLLOUT_VAL_N:-32}
 
-TOTAL_EPOCHS=${TOTAL_EPOCHS:-15}
+TOTAL_EPOCHS=${TOTAL_EPOCHS:-1500}
 SAVE_FREQ=${SAVE_FREQ:-20000}
 TEST_FREQ=${TEST_FREQ:-50}
 
@@ -44,7 +44,7 @@ EXPERIMENT_NAME=${EXPERIMENT_NAME:-sanity_ppo_${INFER_BACKEND}_fsdp_$(date +%Y%m
 # MATH_TRAIN_FILE=${MATH_TRAIN_FILE:-$HOME/data/math/train.parquet}
 # MATH_TEST_FILE=${MATH_TEST_FILE:-$HOME/data/math/test.parquet}
 
-# CKPTS_DIR=${CKPTS_DIR:-"${DATA_ROOT}/ckpts/${project_name}/${experiment_name}"}
+CKPTS_DIR=${CKPTS_DIR:-"${DATA_ROOT}/ckpts/${PROJECT_NAME}/${EXPERIMENT_NAME}"}
 MATH_TRAIN_FILE=${TRAIN_FILE:-"${DATA_ROOT}/data/sanity_test/math_1460.parquet"}
 MATH_TEST_FILE=${TEST_FILE:-"[${DATA_ROOT}/data/sanity_test/aime_2024.parquet,${DATA_ROOT}/data/sanity_test/aime_2025.parquet]"}
 ########################### end user-adjustable ###########################
@@ -56,6 +56,7 @@ n_devices_per_node=${NDEVICES_PER_NODE:-8}
 
 DATA=(
     algorithm.adv_estimator=gae
+    algorithm.rollout_correction.bypass_mode=True
     data.train_files=${MATH_TRAIN_FILE}
     data.val_files=${MATH_TEST_FILE}
     data.train_batch_size=${TRAIN_BATCH_SIZE}
@@ -122,6 +123,7 @@ TRAINER=(
     trainer.save_freq=${SAVE_FREQ}
     trainer.test_freq=${TEST_FREQ}
     trainer.total_epochs=${TOTAL_EPOCHS}
+    trainer.default_local_dir=${CKPTS_DIR}
 )
 
 ########################### launch ###########################
