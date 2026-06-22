@@ -105,6 +105,7 @@ class RLHFDataset(Dataset):
 
         self.cache_dir = os.path.expanduser(config.get("cache_dir", "~/.cache/verl/rlhf"))
         self.prompt_key = config.get("prompt_key", "prompt")
+        self.prompt_critic_key = config.get("prompt_critic_key", None)
         self.image_key = config.get("image_key", "images")
         self.video_key = config.get("video_key", "videos")
         self.audio_key = config.get("audio_key", "audios")
@@ -199,12 +200,18 @@ class RLHFDataset(Dataset):
             tokenizer = self.tokenizer
             processor = self.processor
             prompt_key = self.prompt_key
+            prompt_critic_key = self.prompt_critic_key
+            has_critic = prompt_critic_key and prompt_critic_key in dataframe.column_names
 
             if processor is not None:
 
                 def doc2len(doc) -> int:
                     try:
-                        messages = self._build_messages(doc, key=self.prompt_key)
+                        if has_critic and doc.get(prompt_critic_key) is not None:
+                            max_prompt_key = prompt_critic_key
+                        else:
+                            max_prompt_key = prompt_key
+                        messages = self._build_messages(doc, key=max_prompt_key)
                         # pass tool schemas if available so the processor can format prompts
                         apply_kwargs = dict(**self.apply_chat_template_kwargs)
                         if self.tool_schemas is not None:
@@ -246,6 +253,10 @@ class RLHFDataset(Dataset):
 
                 def doc2len(doc) -> int:
                     try:
+                        if has_critic and doc.get(prompt_critic_key) is not None:
+                            max_prompt_key = prompt_critic_key
+                        else:
+                            max_prompt_key = prompt_key
                         apply_kwargs = dict(**self.apply_chat_template_kwargs)
                         if self.tool_schemas is not None:
                             apply_kwargs["tools"] = self.tool_schemas
@@ -256,7 +267,7 @@ class RLHFDataset(Dataset):
                         apply_kwargs.pop("return_tensors", None)
 
                         tokenized_prompt = tokenizer.apply_chat_template(
-                            doc[prompt_key], add_generation_prompt=True, tokenize=True, **apply_kwargs
+                            doc[max_prompt_key], add_generation_prompt=True, tokenize=True, **apply_kwargs
                         )
                         return len(normalize_token_ids(tokenized_prompt))
                     except Exception:
@@ -386,6 +397,11 @@ class RLHFDataset(Dataset):
         """For rollout, apply_chat_template has been moved to AgentLoop, so we only return raw_prompt here."""
         row_dict: dict = self.dataframe[item]
         row_dict["raw_prompt"] = self._build_messages(row_dict, key=self.prompt_key)
+
+        # If a separate critic prompt key is configured, expose it as raw_prompt_critic.
+        prompt_critic_key = self.prompt_critic_key
+        if prompt_critic_key and prompt_critic_key in row_dict and row_dict[prompt_critic_key] is not None:
+            row_dict["raw_prompt_critic"] = self._build_messages(row_dict, key=prompt_critic_key)
 
         row_dict.pop(self.image_key, None)
         row_dict.pop(self.video_key, None)

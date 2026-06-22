@@ -111,6 +111,8 @@ class AgentLoopOutput(BaseModel):
     """Extra fields for dynamic addition."""
     mm_processor_kwargs: Optional[dict[str, Any]] = None
     """Processor/backend kwargs that must stay aligned across rollout and training paths."""
+    critic_prompt_ids: Optional[list[int]] = None
+    """Token ids for the critic prompt, when a separate critic prompt is used."""
 
     def as_dict(self) -> dict[str, Any]:
         """Convert agent loop output to a dictionary."""
@@ -175,6 +177,15 @@ class _InternalAgentLoopOutput(AgentLoopOutput):
     """Multi-modal inputs for processors (e.g. pixel_values, image_grid_thw, video_grid_thw)."""
     extra_fields: dict[str, Any] = {}
     """Extra fields for dynamic addition."""
+    # Critic-specific padded tensors (set only when a separate critic prompt is used).
+    prompts_critic: Optional[torch.Tensor] = None
+    """Left-padded critic prompt token ids."""
+    input_ids_critic: Optional[torch.Tensor] = None
+    """Padded input ids for critic (prompts_critic + response_ids)."""
+    attention_mask_critic: Optional[torch.Tensor] = None
+    """Padded attention mask for critic."""
+    position_ids_critic: Optional[torch.Tensor] = None
+    """Padded position ids for critic."""
 
 
 class DictConfigWrap:
@@ -750,6 +761,36 @@ class AgentLoopWorker:
                 pad_token_id=self.tokenizer.pad_token_id,
             )
 
+        # Build critic-specific padded tensors when a separate critic prompt was provided.
+        # The critic prompt is assumed to be text-only (no multimodal), so standard 1-D
+        # position ids are used regardless of whether M-RoPE is active.
+        prompts_critic = None
+        input_ids_critic = None
+        attention_mask_critic = None
+        position_ids_critic = None
+        if output.critic_prompt_ids is not None:
+            critic_ids = output.critic_prompt_ids
+            if len(critic_ids) > self.rollout_config.prompt_length:
+                logger.warning(
+                    "critic_prompt_ids length %d exceeds prompt_length %d; "
+                    "falling back to actor prompt for critic.",
+                    len(critic_ids),
+                    self.rollout_config.prompt_length,
+                )
+                critic_ids = output.prompt_ids
+            critic_prompt_output = self._pad_token_ids(
+                critic_ids,
+                max_length=self.rollout_config.prompt_length,
+                padding_side="left",
+                return_attention_mask=True,
+            )
+            prompts_critic = critic_prompt_output["input_ids"]
+            input_ids_critic = torch.cat([critic_prompt_output["input_ids"], response_output["input_ids"]], dim=1)
+            attention_mask_critic = torch.cat(
+                [critic_prompt_output["attention_mask"], response_output["attention_mask"]], dim=1
+            )
+            position_ids_critic = compute_position_id_with_mask(attention_mask_critic)
+
         return _InternalAgentLoopOutput(
             prompt_ids=prompt_output["input_ids"],
             response_ids=response_output["input_ids"],
@@ -768,6 +809,10 @@ class AgentLoopWorker:
             num_turns=output.num_turns,
             metrics=output.metrics,
             extra_fields=output.extra_fields,
+            prompts_critic=prompts_critic,
+            input_ids_critic=input_ids_critic,
+            attention_mask_critic=attention_mask_critic,
+            position_ids_critic=position_ids_critic,
         )
 
     def _compute_multi_modal_inputs(self, output, input_ids) -> dict[str, torch.Tensor]:
@@ -957,6 +1002,14 @@ class AgentLoopWorker:
         if inputs[0].teacher_logprobs is not None and inputs[0].teacher_ids is not None:
             optional_outputs["teacher_logprobs"] = torch.cat([input.teacher_logprobs for input in inputs], dim=0)
             optional_outputs["teacher_ids"] = torch.cat([input.teacher_ids for input in inputs], dim=0)
+        # Include critic-specific tensors when a separate critic prompt was produced.
+        if inputs[0].input_ids_critic is not None:
+            optional_outputs["prompts_critic"] = torch.cat([inp.prompts_critic for inp in inputs], dim=0)
+            optional_outputs["input_ids_critic"] = torch.cat([inp.input_ids_critic for inp in inputs], dim=0)
+            optional_outputs["attention_mask_critic"] = torch.cat(
+                [inp.attention_mask_critic for inp in inputs], dim=0
+            )
+            optional_outputs["position_ids_critic"] = torch.cat([inp.position_ids_critic for inp in inputs], dim=0)
         batch = TensorDict(
             {
                 "prompts": prompt_ids,  # [bsz, prompt_length]

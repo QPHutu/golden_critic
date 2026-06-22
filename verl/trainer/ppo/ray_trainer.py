@@ -1212,9 +1212,24 @@ class RayPPOTrainer:
         )
         metrics.update(global_balance_stats)
 
+    def _use_critic_inputs_if_available(self, batch_td):
+        """Swap critic-specific input tensors into the standard keys so that
+        ``left_right_2_no_padding`` and downstream critic workers see the critic
+        prompt instead of the actor prompt.  A no-op when no critic prompt was
+        produced by the agent loop (backward-compatible path).
+        """
+        if "input_ids_critic" not in batch_td.keys():
+            return batch_td
+        batch_td["input_ids"] = batch_td.pop("input_ids_critic")
+        batch_td["attention_mask"] = batch_td.pop("attention_mask_critic")
+        batch_td["position_ids"] = batch_td.pop("position_ids_critic")
+        batch_td["prompts"] = batch_td.pop("prompts_critic")
+        return batch_td
+
     def _compute_values(self, batch: DataProto) -> DataProto:
         batch_td = batch.to_tensordict()
-        # step 2: convert from padding to nopadding
+        # step 2: swap to critic-specific inputs if available, then remove padding
+        batch_td = self._use_critic_inputs_if_available(batch_td)
         batch_td = left_right_2_no_padding(batch_td)
         # step 3: add meta info
         tu.assign_non_tensor(batch_td, compute_loss=False)
@@ -1331,7 +1346,8 @@ class RayPPOTrainer:
 
     def _update_critic(self, batch: DataProto) -> DataProto:
         batch_td = batch.to_tensordict()
-        # step 2: convert from padding to no-padding
+        # step 2: swap to critic-specific inputs if available, then remove padding
+        batch_td = self._use_critic_inputs_if_available(batch_td)
         batch_td = left_right_2_no_padding(batch_td)
         ppo_mini_batch_size = self.config.critic.ppo_mini_batch_size
         ppo_mini_batch_size = ppo_mini_batch_size * self.config.actor_rollout_ref.rollout.n

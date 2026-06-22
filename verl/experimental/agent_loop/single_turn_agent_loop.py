@@ -54,6 +54,12 @@ class SingleTurnAgentLoop(AgentLoopBase):
             mm_processor_kwargs=mm_processor_kwargs,
         )
 
+        # 2b. tokenize critic prompt if a separate one is provided (text-only)
+        critic_prompt_ids = None
+        raw_prompt_critic = kwargs.get("raw_prompt_critic")
+        if raw_prompt_critic is not None:
+            critic_prompt_ids = await self.apply_chat_template(list(raw_prompt_critic))
+
         # 3. generate sequences
         metrics = {}
         with simple_timer("generate_sequences", metrics):
@@ -85,6 +91,7 @@ class SingleTurnAgentLoop(AgentLoopBase):
             num_turns=2,
             metrics=metrics,
             extra_fields=output.extra_fields,
+            critic_prompt_ids=critic_prompt_ids,
         )
 
         # keeping the schema consistent with tool_agent_loop
