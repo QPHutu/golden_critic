@@ -1429,7 +1429,7 @@ def compute_policy_loss_dppo_tv(
     valid_mask = torch.where(advantages > 0, valid_positive_mask, valid_negative_mask)
     valid_mask = valid_mask.detach().float()
 
-    pg_losses = -advantages * truncated_ratio * log_prob * valid_mask
+    pg_losses = -advantages * ratio * valid_mask
 
     # Apply rollout correction weights if provided
     if rollout_is_weights is not None:
@@ -1513,7 +1513,7 @@ def compute_policy_loss_dppo_kl(
     valid_mask = torch.where(advantages > 0, valid_positive_mask, valid_negative_mask)
     valid_mask = valid_mask.detach().float()
 
-    pg_losses = -advantages * truncated_ratio * log_prob * valid_mask
+    pg_losses = -advantages * ratio * valid_mask
 
     # Apply rollout correction weights if provided
     if rollout_is_weights is not None:

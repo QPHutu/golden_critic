@@ -1219,7 +1219,9 @@ class RayPPOTrainer:
         produced by the agent loop (backward-compatible path).
         """
         if "input_ids_critic" not in batch_td.keys():
+            print("use the same prompt for critic")
             return batch_td
+        print("use different prompt for critic")
         batch_td["input_ids"] = batch_td.pop("input_ids_critic")
         batch_td["attention_mask"] = batch_td.pop("attention_mask_critic")
         batch_td["position_ids"] = batch_td.pop("position_ids_critic")

@@ -10,7 +10,7 @@ DEVICE=${DEVICE:-$(python3 -c 'import torch_npu' 2>/dev/null && echo npu || echo
 INFER_BACKEND=${INFER_BACKEND:-vllm}
 
 # Paths
-DATA_ROOT=${DATA_ROOT:-"${HOME}/verl"}
+DATA_ROOT=${DATA_ROOT:-"/home/aiops/qiph/verl"}
 MODEL_PATH=${MODEL_PATH:-"${DATA_ROOT}/models/DeepSeek-R1-Distill-Qwen-1.5B"}
 
 CRITIC_MODEL_PATH=${CRITIC_MODEL_PATH:-$MODEL_PATH}
@@ -36,8 +36,13 @@ TOTAL_EPOCHS=${TOTAL_EPOCHS:-1500}
 SAVE_FREQ=${SAVE_FREQ:-20000}
 TEST_FREQ=${TEST_FREQ:-50}
 
+CRITIC_KEY=${CRITIC_KEY:-""}
+ALGO=${ALGO:-"dppo_tv"}
+AGG_MODE=${AGG_MODE:-"seq-mean-token-sum"}
+LAM=${LAM:-1.0}
+
 PROJECT_NAME=${PROJECT_NAME:-verl_ppo_math}
-EXPERIMENT_NAME=${EXPERIMENT_NAME:-sanity_ppo_${INFER_BACKEND}_fsdp_$(date +%Y%m%d_%H%M)}
+EXPERIMENT_NAME=${EXPERIMENT_NAME:-${ALGO}_${AGG_MODE}_${CRITIC_KEY}_Lam${LAM}_$(date +%Y%m%d_%H%M)}
 
 # GSM8K_TRAIN_FILE=${GSM8K_TRAIN_FILE:-$HOME/data/gsm8k/train.parquet}
 # GSM8K_TEST_FILE=${GSM8K_TEST_FILE:-$HOME/data/gsm8k/test.parquet}
@@ -57,6 +62,8 @@ n_devices_per_node=${NDEVICES_PER_NODE:-8}
 DATA=(
     algorithm.adv_estimator=gae
     algorithm.rollout_correction.bypass_mode=True
+    algorithm.lam=${LAM}
+    +data.prompt_critic_key=${CRITIC_KEY}
     data.train_files=${MATH_TRAIN_FILE}
     data.val_files=${MATH_TEST_FILE}
     data.train_batch_size=${TRAIN_BATCH_SIZE}
@@ -73,6 +80,8 @@ MODEL=(
 )
 
 ACTOR=(
+    actor_rollout_ref.actor.loss_agg_mode=${AGG_MODE}
+    actor_rollout_ref.actor.policy_loss.loss_mode=${ALGO}
     actor_rollout_ref.actor.optim.lr=${ACTOR_LR}
     actor_rollout_ref.actor.ppo_mini_batch_size=${PPO_MINI_BATCH_SIZE}
     actor_rollout_ref.actor.use_dynamic_bsz=True
