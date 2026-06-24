@@ -95,6 +95,7 @@ class AdvantageEstimator(str, Enum):
     """
 
     GAE = "gae"
+    UPGO = "upgo"
     GRPO = "grpo"
     REINFORCE_PLUS_PLUS = "reinforce_plus_plus"
     REINFORCE_PLUS_PLUS_BASELINE = "reinforce_plus_plus_baseline"
@@ -277,6 +278,62 @@ def compute_gae_advantage_return(
 
             advantages_reversed.append(lastgaelam)
         returns = torch.stack(advantages_reversed[::-1], dim=1) + values
+    return advantages, returns
+
+
+@register_adv_est(AdvantageEstimator.UPGO)  # or simply: @register_adv_est("upgo")
+def compute_upgo_advantage_return(
+    token_level_rewards: torch.Tensor,
+    values: torch.Tensor,
+    response_mask: torch.Tensor,
+    gamma: torch.Tensor,
+    lam: torch.Tensor,
+    upgo_weight: torch.Tensor,
+):
+    """
+    Args:
+        token_level_rewards: `(torch.Tensor)`
+            shape is (bs, response_length)
+        values: `(torch.Tensor)`
+            shape is (bs, response_length)
+        response_mask: `(torch.Tensor)`
+            shape is (bs, response_length). [EOS] mask. The token after [EOS] have mask zero.
+        gamma is `(float)`
+            discounted factor used in RL
+        lam: `(float)`
+            lambda value when computing Generalized Advantage Estimation (https://arxiv.org/abs/1506.02438)
+
+    Returns:
+        advantages: `(torch.Tensor)`
+            shape: (bs, response_length)
+        Returns: `(torch.Tensor)`
+            shape: (bs, response_length)
+
+    """
+    gae_advantages, returns = compute_gae_advantage_return(
+        token_level_rewards,
+        values,
+        response_mask,
+        gamma,
+        lam,
+    )
+    with torch.no_grad():
+        nextvalues = 0
+        last_upgo = 0
+        upgo_reversed = []
+        gen_len = token_level_rewards.shape[-1]
+        for t in reversed(range(gen_len)):
+            upgo_ = token_level_rewards[:, t] + last_upgo
+            upgo_reversed.append(upgo_)
+
+            indicator = ((token_level_rewards[:, t] + nextvalues) >= values[:, t])
+            last_upgo_ = (last_upgo + token_level_rewards[:, t]) * indicator + values[:, t] * (1.0 - indicator)
+            last_upgo = last_upgo_ * response_mask[:, t] + (1 - response_mask[:, t]) * last_upgo
+            nextvalues = values[:, t] * response_mask[:, t] + (1 - response_mask[:, t]) * nextvalues
+        
+        upgo = torch.stack(upgo_reversed[::-1], dim=1)
+        upgo_advantages = upgo - values
+    advantages = upgo_advantages * upgo_weight + gae_advantages * (1.0 - upgo_weight)
     return advantages, returns
 
 

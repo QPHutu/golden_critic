@@ -650,6 +650,7 @@ class AlgoConfig(BaseConfig):
 
     gamma: float = 1.0
     lam: float = 1.0
+    upgo_weight: float = 0.5
     adv_estimator: str = "gae"
     norm_adv_by_std_in_grpo: bool = True
     use_kl_in_reward: bool = False
