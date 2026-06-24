@@ -67,6 +67,8 @@ algorithm:
   # Trade-off between bias and variance in the GAE estimator
   lam: 1.0
 
+  upgo_weight: 0.5
+
   # Advantage estimator type: "gae", "grpo", "reinforce_plus_plus", etc.
   adv_estimator: gae
 

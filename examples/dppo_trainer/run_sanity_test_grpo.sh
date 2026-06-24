@@ -17,8 +17,8 @@ CRITIC_MODEL_PATH=${CRITIC_MODEL_PATH:-$MODEL_PATH}
 NNODES=${NNODES:-1}
 NDEVICES_PER_NODE=${NDEVICES_PER_NODE:-}
 
-TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-1024}
-PPO_MINI_BATCH_SIZE=${PPO_MINI_BATCH_SIZE:-256}
+TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-128}
+PPO_MINI_BATCH_SIZE=${PPO_MINI_BATCH_SIZE:-32}
 MAX_PROMPT_LENGTH=${MAX_PROMPT_LENGTH:-1024}
 MAX_RESPONSE_LENGTH=${MAX_RESPONSE_LENGTH:-8096}
 PPO_MAX_TOKEN_LEN_PER_GPU=${PPO_MAX_TOKEN_LEN_PER_GPU:-24576}
@@ -29,7 +29,7 @@ ENTROPY_COEFF=${ENTROPY_COEFF:-0}
 
 ROLLOUT_TP=${ROLLOUT_TP:-2}
 ROLLOUT_GPU_MEM_UTIL=${ROLLOUT_GPU_MEM_UTIL:-0.6}
-ROLLOUT_N=${ROLLOUT_N:-1}
+ROLLOUT_N=${ROLLOUT_N:-8}
 ROLLOUT_VAL_N=${ROLLOUT_VAL_N:-32}
 
 TOTAL_EPOCHS=${TOTAL_EPOCHS:-1500}
@@ -40,10 +40,9 @@ CRITIC_KEY=${CRITIC_KEY:-""}
 ALGO=${ALGO:-"dppo_tv"}
 AGG_MODE=${AGG_MODE:-"seq-mean-token-sum"}
 LAM=${LAM:-1.0}
-ADV_ESTIMATOR=${ADV_ESTIMATOR:-"gae"}
 
 PROJECT_NAME=${PROJECT_NAME:-verl_ppo_math}
-EXPERIMENT_NAME=${EXPERIMENT_NAME:-adv_ret_bdv_${ADV_ESTIMATOR}_${ALGO}_${AGG_MODE}_${CRITIC_KEY}_Lam${LAM}_$(date +%Y%m%d_%H%M)}
+EXPERIMENT_NAME=${EXPERIMENT_NAME:-group${ROLLOUT_N}_${ALGO}_${AGG_MODE}_$(date +%Y%m%d_%H%M)}
 
 # GSM8K_TRAIN_FILE=${GSM8K_TRAIN_FILE:-$HOME/data/gsm8k/train.parquet}
 # GSM8K_TEST_FILE=${GSM8K_TEST_FILE:-$HOME/data/gsm8k/test.parquet}
@@ -61,7 +60,8 @@ n_devices_per_node=${NDEVICES_PER_NODE:-8}
 ########################### parameter arrays ###########################
 
 DATA=(
-    algorithm.adv_estimator=${ADV_ESTIMATOR}
+    algorithm.adv_estimator=grpo
+    algorithm.norm_adv_by_std_in_grpo=False
     algorithm.rollout_correction.bypass_mode=True
     algorithm.lam=${LAM}
     +data.prompt_critic_key=${CRITIC_KEY}
