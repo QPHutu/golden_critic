@@ -334,6 +334,8 @@ def compute_upgo_advantage_return(
         upgo = torch.stack(upgo_reversed[::-1], dim=1)
         upgo_advantages = upgo - values
     advantages = upgo_advantages * upgo_weight + gae_advantages * (1.0 - upgo_weight)
+    unbiased_adv = returns - values
+    advantages = (advantages + unbiased_adv) / 2.0
     return advantages, returns
 
 

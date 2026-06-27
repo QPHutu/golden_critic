@@ -43,7 +43,7 @@ LAM=${LAM:-1.0}
 ADV_ESTIMATOR=${ADV_ESTIMATOR:-"gae"}
 
 PROJECT_NAME=${PROJECT_NAME:-verl_ppo_math}
-EXPERIMENT_NAME=${EXPERIMENT_NAME:-adv_ret_bdv_${ADV_ESTIMATOR}_${ALGO}_${AGG_MODE}_${CRITIC_KEY}_Lam${LAM}_$(date +%Y%m%d_%H%M)}
+EXPERIMENT_NAME=${EXPERIMENT_NAME:-adv_ret_bdv_mx_${ADV_ESTIMATOR}_${ALGO}_${AGG_MODE}_${CRITIC_KEY}_Lam${LAM}_$(date +%Y%m%d_%H%M)}
 
 # GSM8K_TRAIN_FILE=${GSM8K_TRAIN_FILE:-$HOME/data/gsm8k/train.parquet}
 # GSM8K_TEST_FILE=${GSM8K_TEST_FILE:-$HOME/data/gsm8k/test.parquet}
