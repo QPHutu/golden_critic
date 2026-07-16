@@ -498,15 +498,15 @@ def grade_answer_verl(solution_str, ground_truth):
 
 
 def compute_math_score(solution_str, ground_truth):
-    THINK_END = "</think>"
-    if solution_str.count(THINK_END) != 1:
-        return {
-            "score": 0.0,
-            "formatted": False,
-            # "sympy": False,
-            # "invalid_gt": False,
-        }
-    solution_str = solution_str.split(THINK_END)[1]
+    # THINK_END = "</think>"
+    # if solution_str.count(THINK_END) != 1:
+    #     return {
+    #         "score": 0.0,
+    #         "formatted": False,
+    #         # "sympy": False,
+    #         # "invalid_gt": False,
+    #     }
+    # solution_str = solution_str.split(THINK_END)[1]
 
     model_answer = extract_answer(solution_str)
     if model_answer is None:

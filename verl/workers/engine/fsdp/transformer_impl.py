@@ -1360,5 +1360,6 @@ class FSDPEngineWithValueHead(FSDPEngineWithLMHead):
             else:
                 raise NotImplementedError(f"pad_mode {pad_mode} not implemented")
 
-        values = (torch.atan(values) * (2.0 / torch.pi) + 1.0) / 2.0
+        values = (torch.atan(values) * (2.0 / torch.pi) + 1.0) / 2.0  # (0, 1)
+        # values = torch.atan(values) * (2.0 / torch.pi)  # (-1, 1)
         return {"values": values}
