@@ -215,9 +215,9 @@ def compute_advantage(
     if "response_mask" not in data.batch.keys():
         data.batch["response_mask"] = compute_response_mask(data)
     # prepare response group
-    if adv_estimator in [AdvantageEstimator.GAE, AdvantageEstimator.UPGO]:
+    if adv_estimator in [AdvantageEstimator.GAE, AdvantageEstimator.LAGAE, AdvantageEstimator.UPGO]:
         # Compute advantages and returns using Generalized Advantage Estimation (GAE)
-        if adv_estimator == AdvantageEstimator.GAE:
+        if adv_estimator in [AdvantageEstimator.GAE, AdvantageEstimator.LAGAE]:
             advantages, returns = core_algos.compute_gae_advantage_return(
                 token_level_rewards=data.batch["token_level_rewards"],
                 values=data.batch["values"],
