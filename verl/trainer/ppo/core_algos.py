@@ -283,7 +283,7 @@ def compute_gae_advantage_return(
 
 
 @register_adv_est(AdvantageEstimator.LAGAE)  # or simply: @register_adv_est("gae")
-def compute_gae_advantage_return(
+def compute_lagae_advantage_return(
     token_level_rewards: torch.Tensor,
     values: torch.Tensor,
     response_mask: torch.Tensor,
@@ -383,7 +383,7 @@ def compute_upgo_advantage_return(
             shape: (bs, response_length)
 
     """
-    gae_advantages, returns = compute_gae_advantage_return(
+    gae_advantages, returns = compute_lagae_advantage_return(
         token_level_rewards,
         values,
         response_mask,
@@ -399,7 +399,7 @@ def compute_upgo_advantage_return(
             upgo_ = token_level_rewards[:, t] + last_upgo
             upgo_reversed.append(upgo_)
 
-            indicator = ((token_level_rewards[:, t] + last_upgo) >= values[:, t]).float()
+            indicator = ((token_level_rewards[:, t] + nextvalues) >= values[:, t]).float()
             last_upgo_ = (last_upgo + token_level_rewards[:, t]) * indicator + values[:, t] * (1.0 - indicator)
             last_upgo = last_upgo_ * response_mask[:, t] + (1 - response_mask[:, t]) * last_upgo
             nextvalues = values[:, t] * response_mask[:, t] + (1 - response_mask[:, t]) * nextvalues

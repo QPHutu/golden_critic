@@ -58,7 +58,7 @@ EXPERIMENT_NAME=${EXPERIMENT_NAME:-${CRITIC_KEY}_${ADV_ESTIMATOR}_Lam${LAM}_${AL
 
 CKPTS_DIR=${CKPTS_DIR:-"${DATA_ROOT}/ckpts/${PROJECT_NAME}/${EXPERIMENT_NAME}"}
 ROOT="${DATA_ROOT}/data/deepscaler/"
-MATH_TRAIN_FILE=${TRAIN_FILE:-"${ROOT}/deepscaler.parquet"}
+MATH_TRAIN_FILE=${TRAIN_FILE:-"${ROOT}/deepscaler_v1.parquet"}
 MATH_TEST_FILE=${TEST_FILE:-"[${ROOT}/aime_2025.parquet]"}
 # MATH_TEST_FILE=${TEST_FILE:-"[${ROOT}/aime_2025.parquet,${ROOT}/aime_2026.parquet,${ROOT}/brumo_2025.parquet,${ROOT}/hmmt_feb_2026.parquet,${ROOT}/hmmt_nov_2025.parquet]"}
 ########################### end user-adjustable ###########################
