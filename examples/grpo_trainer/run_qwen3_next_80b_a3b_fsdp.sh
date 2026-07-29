@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 set -xeuo pipefail
 
+
+DTYPE=${DTYPE:-"fp16"}
+
 # ---- user-adjustable ----
 # DEVICE is auto-detected by probing torch_npu; override only for special cases.
 DEVICE=${DEVICE:-$(python3 -c 'import torch_npu' 2>/dev/null && echo npu || echo gpu)}
 PROJECT_NAME=${PROJECT_NAME:-verl_grpo_qwen3-next-80b}
-EXPERIMENT_NAME=${EXPERIMENT_NAME:-qwen3_next_80b_a3b_grpo_vllm_fsdp_$(date +%Y%m%d_%H%M)}
+EXPERIMENT_NAME=${EXPERIMENT_NAME:-${DTYPE}_qwen3_next_80b_a3b_grpo_vllm_fsdp_$(date +%Y%m%d_%H%M)}
 
 # Paths
-WORK_DIR=${WORK_DIR:-"${HOME}/verl"}
-MODEL_PATH=${MODEL_PATH:-"${WORK_DIR}/Qwen3-Next-80B-A3B-Instruct"}
-TRAIN_FILE=${TRAIN_FILE:-"${WORK_DIR}/datasets/dapo-math-17k/dapo-math-17k.parquet"}
-TEST_FILE=${TEST_FILE:-"${WORK_DIR}/datasets/aime/aime-2024.parquet"}
+WORK_DIR=${WORK_DIR:-"/home/aiops/qiph/verl/"}
+MODEL_PATH=${MODEL_PATH:-"${WORK_DIR}/models/Qwen3-Next-80B-A3B-Instruct"}
+TRAIN_FILE=${TRAIN_FILE:-"${WORK_DIR}/data/dapo/dapo-math-17k.parquet"}
+TEST_FILE=${TEST_FILE:-"${WORK_DIR}/data/dapo/aime-2024.parquet"}
 NNODES=${NNODES:-4}
 NDEVICES_PER_NODE=${NDEVICES_PER_NODE:-}
 
@@ -27,7 +30,7 @@ clip_ratio_high=${CLIP_RATIO_HIGH:-0.28}
 temperature=${TEMPERATURE:-1.0}
 top_p=${TOP_P:-1.0}
 top_k=${TOP_K:--1} # 0 for HF rollout, -1 for vLLM rollout
-val_top_p=${VAL_TOP_P:-0.7}
+val_top_p=${VAL_TOP_P:-1.0}
 
 # batch
 train_batch_size=${TRAIN_BATCH_SIZE:-16}
@@ -81,12 +84,12 @@ ACTOR=(
 
     # fsdp
     actor_rollout_ref.actor.fsdp_config.use_orig_params=True
-    actor_rollout_ref.actor.fsdp_config.model_dtype=bfloat16
+    actor_rollout_ref.actor.fsdp_config.model_dtype=${DTYPE}
     actor_rollout_ref.actor.fsdp_config.param_offload=${offload}
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=${offload}
     actor_rollout_ref.actor.fsdp_config.forward_prefetch=False
     actor_rollout_ref.actor.fsdp_config.fsdp_size=-1
-    +actor_rollout_ref.actor.fsdp_config.mixed_precision.reduce_dtype=bf16
+    +actor_rollout_ref.actor.fsdp_config.mixed_precision.reduce_dtype=${DTYPE}
 
     # optimizer
     actor_rollout_ref.actor.optim.lr=${learning_rate}
@@ -115,6 +118,7 @@ ACTOR=(
 
 ROLLOUT=(
     actor_rollout_ref.rollout.name=vllm
+    actor_rollout_ref.rollout.dtype=${DTYPE}
     actor_rollout_ref.rollout.n=${rollout_n}
     actor_rollout_ref.rollout.tensor_model_parallel_size=${gen_tp}
     actor_rollout_ref.rollout.gpu_memory_utilization=0.8
@@ -130,7 +134,7 @@ ROLLOUT=(
     actor_rollout_ref.rollout.val_kwargs.top_p=${val_top_p}
     actor_rollout_ref.rollout.val_kwargs.top_k=${top_k}
     actor_rollout_ref.rollout.val_kwargs.do_sample=True
-    actor_rollout_ref.rollout.val_kwargs.n=1
+    actor_rollout_ref.rollout.val_kwargs.n=16
 
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1
     actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=${use_dynamic_bsz}

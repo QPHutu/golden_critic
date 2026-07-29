@@ -684,10 +684,14 @@ class RayPPOTrainer:
             # evaluate using reward_function
             reward_tensor, reward_extra_info = extract_reward(test_batch)
 
+            response_mask = test_batch.batch["response_mask"]
+            response_len = response_mask.sum(-1).cpu().tolist()
+
             scores = reward_tensor.sum(-1).cpu().tolist()
             sample_scores.extend(scores)
 
             reward_extra_infos_dict["reward"].extend(scores)
+            reward_extra_infos_dict["response_length"].extend(response_len)
             for key, values in reward_extra_info.items():
                 if key not in reward_extra_infos_dict:
                     reward_extra_infos_dict[key] = []

@@ -8,45 +8,50 @@ set -xeuo pipefail
 ########################### user-adjustable ###########################
 # DEVICE is auto-detected by probing torch_npu; override only for special cases.
 DEVICE=${DEVICE:-$(python3 -c 'import torch_npu' 2>/dev/null && echo npu || echo gpu)}
-MODEL_PATH=${MODEL_PATH:-Qwen/Qwen3-235B-A22B}
+MODEL_PATH=${MODEL_PATH:-"/home/aiops/qiph/verl/models/Qwen3-235B-A22B"}
 MCORE_MODEL_PATH=${MCORE_MODEL_PATH:-}
 NNODES=${NNODES:-8}
 NDEVICES_PER_NODE=${NDEVICES_PER_NODE:-}
 
-TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-128}
-PPO_MINI_BATCH_SIZE=${PPO_MINI_BATCH_SIZE:-128}
-MAX_PROMPT_LENGTH=${MAX_PROMPT_LENGTH:-8192}
-MAX_RESPONSE_LENGTH=${MAX_RESPONSE_LENGTH:-4096}
+DTYPE=${DTYPE:-"bfloat16"}
+
+TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-16}
+PPO_MINI_BATCH_SIZE=${PPO_MINI_BATCH_SIZE:-16}
+MAX_PROMPT_LENGTH=${MAX_PROMPT_LENGTH:-2048}
+MAX_RESPONSE_LENGTH=${MAX_RESPONSE_LENGTH:-32768}
 PPO_MAX_TOKEN_LEN_PER_GPU=${PPO_MAX_TOKEN_LEN_PER_GPU:-$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH))}
 
 ACTOR_LR=${ACTOR_LR:-1e-6}
-KL_LOSS_COEF=${KL_LOSS_COEF:-0.001}
+KL_LOSS_COEF=${KL_LOSS_COEF:-0.0}
 ENTROPY_COEFF=${ENTROPY_COEFF:-0}
 CLIP_RATIO_LOW=${CLIP_RATIO_LOW:-0.2}
 CLIP_RATIO_HIGH=${CLIP_RATIO_HIGH:-0.28}
 
-ACTOR_TP=${ACTOR_TP:-4}
+ACTOR_TP=${ACTOR_TP:-8}
 ACTOR_PP=${ACTOR_PP:-8}
-ACTOR_EP=${ACTOR_EP:-4}
+ACTOR_EP=${ACTOR_EP:-8}
 ALL_OFFLOAD=${ALL_OFFLOAD:-True}
 
 ROLLOUT_TP=${ROLLOUT_TP:-8}
-ROLLOUT_DP=${ROLLOUT_DP:-}
+ROLLOUT_DP=${ROLLOUT_DP:-8}
 ROLLOUT_EP=${ROLLOUT_EP:-64}
-ROLLOUT_GPU_MEM_UTIL=${ROLLOUT_GPU_MEM_UTIL:-0.75}
-ROLLOUT_N=${ROLLOUT_N:-16}
+ROLLOUT_GPU_MEM_UTIL=${ROLLOUT_GPU_MEM_UTIL:-0.5}
+ROLLOUT_N=${ROLLOUT_N:-8}
 ROLLOUT_MAX_NUM_BATCHED_TOKENS=${ROLLOUT_MAX_NUM_BATCHED_TOKENS:-1024}
 
 TOTAL_EPOCHS=${TOTAL_EPOCHS:-1}
-SAVE_FREQ=${SAVE_FREQ:-100}
-TEST_FREQ=${TEST_FREQ:--1}
+SAVE_FREQ=${SAVE_FREQ:-10000}
+TEST_FREQ=${TEST_FREQ:-10}
 
 PROJECT_NAME=${PROJECT_NAME:-verl_grpo_scale_demo}
-EXPERIMENT_NAME=${EXPERIMENT_NAME:-qwen3_235b_a22b_grpo_vllm_megatron_$(date +%Y%m%d_%H%M)}
+EXPERIMENT_NAME=${EXPERIMENT_NAME:-${DTYPE}_qwen3_235b_a22b_grpo_vllm_megatron_$(date +%Y%m%d_%H%M)}
 CKPTS_DIR=${CKPTS_DIR:-.ckpt}
 
-TRAIN_FILE=${TRAIN_FILE:-$HOME/data/gsm8k/train.parquet}
-TEST_FILE=${TEST_FILE:-$HOME/data/gsm8k/test.parquet}
+WORK_DIR=${WORK_DIR:-"/home/aiops/qiph/verl/data/deepscaler"}
+TRAIN_FILE=${TRAIN_FILE:-"${WORK_DIR}/deepscaler_v1.parquet"}
+TEST_FILE=${TEST_FILE:-"[${WORK_DIR}/aime_2025.parquet,${WORK_DIR}/aime_2026.parquet]"}
+# TRAIN_FILE=${TRAIN_FILE:-$HOME/data/gsm8k/train.parquet}
+# TEST_FILE=${TEST_FILE:-$HOME/data/gsm8k/test.parquet}
 ########################### end user-adjustable ###########################
 
 ########################### derived defaults ###########################
@@ -94,15 +99,17 @@ ACTOR=(
     actor_rollout_ref.actor.ppo_mini_batch_size=${PPO_MINI_BATCH_SIZE}
     actor_rollout_ref.actor.use_dynamic_bsz=True
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=${PPO_MAX_TOKEN_LEN_PER_GPU}
-    actor_rollout_ref.actor.use_kl_loss=True
+    actor_rollout_ref.actor.use_kl_loss=False
     actor_rollout_ref.actor.kl_loss_coef=${KL_LOSS_COEF}
     actor_rollout_ref.actor.kl_loss_type=low_var_kl
     actor_rollout_ref.actor.entropy_coeff=${ENTROPY_COEFF}
     actor_rollout_ref.actor.clip_ratio_low=${CLIP_RATIO_LOW}
     actor_rollout_ref.actor.clip_ratio_high=${CLIP_RATIO_HIGH}
+    actor_rollout_ref.actor.megatron.dtype=${DTYPE}
     actor_rollout_ref.actor.megatron.tensor_model_parallel_size=${ACTOR_TP}
     actor_rollout_ref.actor.megatron.pipeline_model_parallel_size=${ACTOR_PP}
     actor_rollout_ref.actor.megatron.expert_model_parallel_size=${ACTOR_EP}
+    actor_rollout_ref.actor.megatron.expert_tensor_parallel_size=1
     actor_rollout_ref.actor.megatron.param_offload=${ALL_OFFLOAD}
     actor_rollout_ref.actor.megatron.optimizer_offload=${ALL_OFFLOAD}
     actor_rollout_ref.actor.megatron.grad_offload=${ALL_OFFLOAD}
@@ -115,6 +122,7 @@ ACTOR=(
 
 ROLLOUT=(
     actor_rollout_ref.rollout.name=vllm
+    actor_rollout_ref.rollout.dtype=${DTYPE}
     actor_rollout_ref.rollout.tensor_model_parallel_size=${ROLLOUT_TP}
     actor_rollout_ref.rollout.expert_parallel_size=${ROLLOUT_EP}
     actor_rollout_ref.rollout.gpu_memory_utilization=${ROLLOUT_GPU_MEM_UTIL}
@@ -125,6 +133,11 @@ ROLLOUT=(
     actor_rollout_ref.rollout.enable_chunked_prefill=True
     actor_rollout_ref.rollout.enable_prefix_caching=True
     actor_rollout_ref.rollout.free_cache_engine=True
+    actor_rollout_ref.rollout.val_kwargs.temperature=1.0
+    actor_rollout_ref.rollout.val_kwargs.top_p=1.0
+    actor_rollout_ref.rollout.val_kwargs.top_k=-1
+    actor_rollout_ref.rollout.val_kwargs.do_sample=True
+    actor_rollout_ref.rollout.val_kwargs.n=16
 )
 
 REF=(
@@ -140,11 +153,12 @@ TRAINER=(
     actor_rollout_ref.nccl_timeout=7200
     trainer.balance_batch=True
     trainer.logger='["console","wandb"]'
+    trainer.log_val_generations=1
     trainer.project_name=${PROJECT_NAME}
     trainer.experiment_name=${EXPERIMENT_NAME}
     trainer.n_gpus_per_node=${n_devices_per_node}
     trainer.nnodes=${NNODES}
-    trainer.val_before_train=False
+    trainer.val_before_train=True
     trainer.save_freq=${SAVE_FREQ}
     trainer.test_freq=${TEST_FREQ}
     trainer.total_epochs=${TOTAL_EPOCHS}

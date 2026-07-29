@@ -12,6 +12,8 @@ MODEL_PATH=${MODEL_PATH:-Qwen/Qwen3-30B-A3B-Base}
 NNODES=${NNODES:-1}
 NGPUS_PER_NODE=${NGPUS_PER_NODE:-8}
 
+DTYPE=${DTYPE:-"bfloat16"}
+
 # LOSS_MODE selects DPPO variant: dppo_tv | dppo_kl (or vanilla for GRPO baseline)
 LOSS_MODE=${LOSS_MODE:-dppo_tv}
 case $LOSS_MODE in
@@ -46,7 +48,7 @@ save_freq=${SAVE_FREQ:-50}
 test_freq=${TEST_FREQ:-10}
 
 project_name=${PROJECT_NAME:-verl_dppo_qwen3_moe}
-experiment_name=${EXPERIMENT_NAME:-qwen3_30b_a3b_${LOSS_MODE}_vllm_megatron}
+experiment_name=${EXPERIMENT_NAME:-qwen3_30b_a3b_${DTYPE}_${LOSS_MODE}_vllm_megatron}
 # ---- end user-adjustable ----
 
 train_file=${TRAIN_FILE:-$HOME/data/dapo-math-17k/train.parquet}
@@ -83,6 +85,7 @@ ACTOR=(
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=${ppo_max_token_len_per_gpu}
     actor_rollout_ref.actor.use_kl_loss=False
     actor_rollout_ref.actor.entropy_coeff=${entropy_coeff}
+    actor_rollout_ref.actor.megatron.dtype=${DTYPE}
     actor_rollout_ref.actor.megatron.tensor_model_parallel_size=${actor_tp}
     actor_rollout_ref.actor.megatron.pipeline_model_parallel_size=${actor_pp}
     actor_rollout_ref.actor.megatron.expert_model_parallel_size=${actor_ep}
@@ -100,6 +103,7 @@ ACTOR=(
 
 ROLLOUT=(
     actor_rollout_ref.rollout.name=vllm
+    actor_rollout_ref.rollout.dtype=${DTYPE}
     actor_rollout_ref.rollout.tensor_model_parallel_size=${rollout_tp}
     actor_rollout_ref.rollout.gpu_memory_utilization=${rollout_gpu_mem_util}
     actor_rollout_ref.rollout.n=${rollout_n}

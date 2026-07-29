@@ -39,7 +39,8 @@ from verl.workers.rollout.replica import get_rollout_replica_class
 
 async def start_server(config):
     tp_size = config.actor_rollout_ref.rollout.tensor_model_parallel_size
-    num_replicas = (config.trainer.n_gpus_per_node * config.trainer.nnodes) // tp_size
+    dp_size = config.actor_rollout_ref.rollout.data_parallel_size
+    num_replicas = (config.trainer.n_gpus_per_node * config.trainer.nnodes) // (tp_size * dp_size)
     rollout_config = config.actor_rollout_ref.rollout
     model_config = config.actor_rollout_ref.model
     # create standalone rollout server

@@ -40,7 +40,8 @@ set -xeuo pipefail
 unset http_proxy
 unset https_proxy
 # download geo3k dataset
-hf download tyzhu/geo3k --repo-type dataset --local-dir $HOME/data/geo3k
+DATA_HOME="/home/aiops/qiph/verl/"
+# hf download tyzhu/geo3k --repo-type dataset --local-dir $DATA_HOME/data/geo3k
 
 # DEVICE is auto-detected by probing torch_npu; override only for special cases.
 DEVICE=${DEVICE:-$(python3 -c 'import torch_npu' 2>/dev/null && echo npu || echo gpu)}
@@ -69,9 +70,10 @@ case "${DEVICE}" in
 esac
 
 # ---- user-adjustable ----
-test_files=${test_files:-$HOME/data/geo3k/test.parquet}
-train_files=${train_files:-$HOME/data/geo3k/train.parquet}
-HF_MODEL_PATH=${HF_MODEL_PATH:-"Qwen/Qwen3.5-122B-A10B"}
+train_files=${train_files:-$DATA_HOME/data/dapo/dapo-math-17k.parquet}
+test_files=${test_files:-$DATA_HOME/data/dapo/aime-2024.parquet}
+HF_MODEL_PATH="/home/aiops/qiph/verl/data/deepscaler/Qwen3.5-122B-A10B"
+# HF_MODEL_PATH=${HF_MODEL_PATH:-"Qwen/Qwen3.5-122B-A10B"}
 
 save_contents="['model', 'extra', 'optimizer']"
 
@@ -81,12 +83,14 @@ exp_name=${exp_name:-'qwen3_5_122b_megatron'}
 rollout_backend="vllm"
 
 save_path=${save_path:-"Qwen/Qwen3.5-122B/verl_checkpoint"}
-save_freq=50
+save_freq=50000
 
 train_batch_size=128
-max_prompt_length=3240
-max_response_length=4096
+max_prompt_length=1024
+max_response_length=7168
 adv_estimator=${adv_estimator:-grpo}
+
+DTYPE=${DTYPE:-"float16"}
 
 TP=${TP:-2}
 CP=${CP:-1}
@@ -143,7 +147,7 @@ ACTOR=(
     actor_rollout_ref.actor.megatron.param_offload=${ALL_OFFLOAD}
     actor_rollout_ref.actor.megatron.optimizer_offload=${ALL_OFFLOAD}
     actor_rollout_ref.actor.megatron.grad_offload=${ALL_OFFLOAD}
-    actor_rollout_ref.actor.megatron.dtype=bfloat16
+    actor_rollout_ref.actor.megatron.dtype=${DTYPE}
     actor_rollout_ref.actor.megatron.virtual_pipeline_model_parallel_size=$ACTOR_VPP
     actor_rollout_ref.actor.megatron.use_remove_padding=False
     actor_rollout_ref.actor.megatron.override_transformer_config.recompute_granularity=full
@@ -164,7 +168,7 @@ ROLLOUT=(
     actor_rollout_ref.rollout.tensor_model_parallel_size=${GEN_TP}
     actor_rollout_ref.rollout.gpu_memory_utilization=${rollout_gpu_memory_utilization}
     actor_rollout_ref.rollout.n=6
-    actor_rollout_ref.rollout.dtype=bfloat16
+    actor_rollout_ref.rollout.dtype=${DTYPE}
     actor_rollout_ref.rollout.checkpoint_engine.update_weights_bucket_megabytes=4096
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=${rollout_log_prob_micro_batch_size_per_gpu}
     actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=False
