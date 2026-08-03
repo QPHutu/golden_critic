@@ -72,6 +72,7 @@ DATA=(
     algorithm.adv_estimator=${ADV_ESTIMATOR}
     algorithm.rollout_correction.bypass_mode=True
     algorithm.lam=${LAM}
+    algorithm.norm_adv_by_std_in_grpo=False
     +data.prompt_critic_key=${CRITIC_KEY}
     data.train_files=${MATH_TRAIN_FILE}
     data.val_files=${MATH_TEST_FILE}
