@@ -18,6 +18,7 @@ from .gdpo import GDPORewardManager
 from .naive import NaiveRewardManager
 from .limited import RateLimitedRewardManager
 from .remote import RemoteRewardManager
+from .rubric_judge import RubricJudgeRewardManager
 
 __all__ = [
     "DAPORewardManager",
@@ -25,6 +26,7 @@ __all__ = [
     "NaiveRewardManager",
     "RateLimitedRewardManager",
     "RemoteRewardManager",
+    "RubricJudgeRewardManager",
     "register",
     "get_reward_manager_cls",
 ]

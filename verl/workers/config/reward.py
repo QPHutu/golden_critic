@@ -87,7 +87,30 @@ class RewardModelConfig(BaseConfig):
     n_gpus_per_node: int = 8
     nnodes: int = 0
     model_path: Optional[str] = None
+    # ``discriminative`` uses the model's scalar score endpoint. ``rubric_judge``
+    # serves an instruction model and asks it to judge a rollout against the
+    # sample's golden rubric through the reward-model router.
+    mode: str = "discriminative"
+    # Settings used only when mode is ``rubric_judge``.
+    judge_max_tokens: int = 2048
+    judge_temperature: float = 0.0
+    judge_timeout: float = 120.0
+    judge_max_retries: int = 2
+    judge_hard_rule_weight: float = 1.0
+    judge_principle_weight: float = 1.0
     rollout: RolloutConfig = field(default_factory=RolloutConfig)
+
+    def __post_init__(self):
+        assert self.mode in {"discriminative", "rubric_judge"}, (
+            "reward.reward_model.mode must be 'discriminative' or 'rubric_judge', "
+            f"got {self.mode!r}"
+        )
+        if self.mode == "rubric_judge":
+            assert self.judge_max_tokens > 0, "rubric_judge requires judge_max_tokens > 0"
+            assert self.judge_timeout > 0, "rubric_judge requires judge_timeout > 0"
+            assert self.judge_max_retries >= 0, "rubric_judge requires judge_max_retries >= 0"
+            assert self.judge_hard_rule_weight >= 0, "rubric_judge requires a non-negative hard-rule weight"
+            assert self.judge_principle_weight >= 0, "rubric_judge requires a non-negative principle weight"
 
 
 @dataclass

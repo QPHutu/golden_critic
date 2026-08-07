@@ -591,6 +591,10 @@ def compute_gdpo_outcome_advantage(
     num_scores = len(score_list)
 
     if reward_weights is not None:
+        assert len(reward_weights) == num_scores, (
+            "GDPO requires algorithm.gdpo_reward_weights to have one entry per "
+            f"reward key: got {len(reward_weights)} weights for {num_scores} rewards."
+        )
         weights = torch.tensor(reward_weights, dtype=torch.float32, device=token_level_rewards.device)
     else:
         weights = torch.ones(num_scores, dtype=torch.float32, device=token_level_rewards.device)

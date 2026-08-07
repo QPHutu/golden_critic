@@ -134,6 +134,12 @@ class RewardLoopWorker:
             reward_router_address=self.reward_router_address,
             reward_model_tokenizer=self.reward_model_tokenizer,
         )
+        if self.config.reward.reward_model.get("mode", "discriminative") == "rubric_judge":
+            assert self.config.reward.reward_model.enable, "rubric_judge requires reward.reward_model.enable=true"
+            assert self.config.reward.reward_manager.name == "rubric_judge", (
+                "reward.reward_model.mode=rubric_judge requires "
+                "reward.reward_manager.name=rubric_judge"
+            )
 
     async def compute_score_batch(self, data: DataProto) -> list[dict]:
         tasks = []
@@ -143,6 +149,11 @@ class RewardLoopWorker:
         return outputs
 
     async def compute_score(self, data: DataProto) -> dict:
+        # A rubric judge is a generative reward model.  It must go through its
+        # reward manager (which calls the router's chat-completions endpoint),
+        # not the legacy discriminative ``classify`` path below.
+        if self.config.reward.reward_model.get("mode", "discriminative") == "rubric_judge":
+            return await self.reward_manager.run_single(data)
         if self.config.reward.custom_reward_function.path is not None:
             # directly use user-customized reward function
             return await self.reward_manager.run_single(data)

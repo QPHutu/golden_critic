@@ -35,6 +35,15 @@ reward_model:
   nnodes: 0
 
   model_path: null
+  # ``discriminative`` preserves the existing reward-model behavior.
+  # ``rubric_judge`` serves this frozen model as a generative LLM judge.
+  mode: discriminative
+  judge_max_tokens: 2048
+  judge_temperature: 0.0
+  judge_timeout: 120.0
+  judge_max_retries: 2
+  judge_hard_rule_weight: 1.0
+  judge_principle_weight: 1.0
   rollout:
     _target_: verl.workers.config.RolloutConfig
     name: ???
