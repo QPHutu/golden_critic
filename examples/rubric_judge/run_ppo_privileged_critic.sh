@@ -1,32 +1,184 @@
 #!/usr/bin/env bash
+# PPO | text | FSDP training | GPU/NPU
 # PPO/GAE with a frozen local rubric judge and a rubric-privileged critic.
+
 set -xeuo pipefail
 
-DATA_DIR=${DATA_DIR:?Set DATA_DIR to converted OpenRubrics parquet files}
-POLICY_MODEL=${POLICY_MODEL:?Set POLICY_MODEL}
-JUDGE_MODEL=${JUDGE_MODEL:?Set JUDGE_MODEL}
+########################### user-adjustable ###########################
+# DEVICE is auto-detected by probing torch_npu; override only for special cases.
+DEVICE=${DEVICE:-$(python3 -c 'import torch_npu' 2>/dev/null && echo npu || echo gpu)}
+INFER_BACKEND=${INFER_BACKEND:-vllm}
+
+# Paths
+DATA_ROOT=${DATA_ROOT:-"/home/aiops/qiph/verl"}
+DATA_DIR=${DATA_DIR:-"${DATA_ROOT}/data/openrubrics"}
+POLICY_MODEL=${POLICY_MODEL:-"${DATA_ROOT}/models/Qwen3-4B-Base"}
+JUDGE_MODEL=${JUDGE_MODEL:-"${DATA_ROOT}/models/Qwen3-4B-Instruct-2507"}
+
+CRITIC_MODEL_PATH=${CRITIC_MODEL_PATH:-$POLICY_MODEL}
 NNODES=${NNODES:-1}
 NGPUS_PER_NODE=${NGPUS_PER_NODE:-8}
-JUDGE_GPUS_PER_NODE=${JUDGE_GPUS_PER_NODE:-2}
+JUDGE_GPUS_PER_NODE=${JUDGE_GPUS_PER_NODE:-8}
 
+DTYPE=${DTYPE:-bfloat16}
+
+TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-512}
+PPO_MINI_BATCH_SIZE=${PPO_MINI_BATCH_SIZE:-128}
+MAX_PROMPT_LENGTH=${MAX_PROMPT_LENGTH:-4000}
+MAX_RESPONSE_LENGTH=${MAX_RESPONSE_LENGTH:-8000}
+PPO_MAX_TOKEN_LEN_PER_GPU=${PPO_MAX_TOKEN_LEN_PER_GPU:-12000}
+
+ACTOR_LR=${ACTOR_LR:-1e-6}
+CRITIC_LR=${CRITIC_LR:-5e-6}
+ENTROPY_COEFF=${ENTROPY_COEFF:-0}
+
+ROLLOUT_TP=${ROLLOUT_TP:-2}
+ROLLOUT_GPU_MEM_UTIL=${ROLLOUT_GPU_MEM_UTIL:-0.75}
+ROLLOUT_N=${ROLLOUT_N:-1}
+ROLLOUT_VAL_N=${ROLLOUT_VAL_N:-1}
+
+TOTAL_EPOCHS=${TOTAL_EPOCHS:-1500}
+SAVE_FREQ=${SAVE_FREQ:-250}
+TEST_FREQ=${TEST_FREQ:-25}
+
+CRITIC_KEY=${CRITIC_KEY:-""}
+ALGO=${ALGO:-"vanilla"}
+AGG_MODE=${AGG_MODE:-"seq-mean-token-sum"}
+LAM=${LAM:-0.4}
+ADV_ESTIMATOR=${ADV_ESTIMATOR:-"lagae"}
+
+if [[ $ADV_ESTIMATOR == "grpo" ]]; then
+    TRAIN_BATCH_SIZE=64
+    PPO_MINI_BATCH_SIZE=16
+    ROLLOUT_N=8
+fi
+
+PROJECT_NAME=${PROJECT_NAME:-verl_rubric_judge}
+EXPERIMENT_NAME=${EXPERIMENT_NAME:-${CRITIC_KEY}_${ADV_ESTIMATOR}_Lam${LAM}_${ALGO}_${AGG_MODE}_$(date +%Y%m%d_%H%M)}
+
+CKPTS_DIR=${CKPTS_DIR:-"${DATA_ROOT}/ckpts/${PROJECT_NAME}/${EXPERIMENT_NAME}"}
+TRAIN_FILE=${TRAIN_FILE:-"${DATA_DIR}/train.parquet"}
+TEST_FILE=${TEST_FILE:-"${DATA_DIR}/test.parquet"}
+########################### end user-adjustable ###########################
+
+########################### derived defaults ###########################
+n_devices_per_node=${NGPUS_PER_NODE:-8}
+
+########################### parameter arrays ###########################
+
+DATA=(
+    algorithm.adv_estimator=${ADV_ESTIMATOR}
+    algorithm.rollout_correction.bypass_mode=True
+    algorithm.lam=${LAM}
+    algorithm.norm_adv_by_std_in_grpo=False
+    +data.prompt_critic_key=${CRITIC_KEY}
+    data.train_files="$TRAIN_FILE"
+    data.val_files="$TEST_FILE"
+    data.train_batch_size=${TRAIN_BATCH_SIZE}
+    data.max_prompt_length=${MAX_PROMPT_LENGTH}
+    data.max_response_length=${MAX_RESPONSE_LENGTH}
+    data.filter_overlong_prompts=True
+    data.truncation='error'
+)
+
+MODEL=(
+    actor_rollout_ref.model.path="$POLICY_MODEL"
+    actor_rollout_ref.model.use_remove_padding=True
+    actor_rollout_ref.model.enable_gradient_checkpointing=True
+)
+
+ACTOR=(
+    actor_rollout_ref.actor.loss_agg_mode=${AGG_MODE}
+    actor_rollout_ref.actor.clip_ratio_low=0.2
+    actor_rollout_ref.actor.clip_ratio_high=0.28
+    actor_rollout_ref.actor.clip_ratio_c=10.0
+    actor_rollout_ref.actor.policy_loss.loss_mode=${ALGO}
+    actor_rollout_ref.actor.optim.lr=${ACTOR_LR}
+    actor_rollout_ref.actor.ppo_mini_batch_size=${PPO_MINI_BATCH_SIZE}
+    actor_rollout_ref.actor.use_dynamic_bsz=True
+    actor_rollout_ref.actor.ppo_max_token_len_per_gpu=${PPO_MAX_TOKEN_LEN_PER_GPU}
+    actor_rollout_ref.actor.entropy_coeff=${ENTROPY_COEFF}
+    actor_rollout_ref.actor.calculate_entropy=True
+    actor_rollout_ref.actor.fsdp_config.param_offload=True
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=True
+    actor_rollout_ref.actor.fsdp_config.dtype=${DTYPE}
+)
+
+ROLLOUT=(
+    actor_rollout_ref.rollout.name=${INFER_BACKEND}
+    actor_rollout_ref.rollout.dtype=${DTYPE}
+    actor_rollout_ref.rollout.tensor_model_parallel_size=${ROLLOUT_TP}
+    actor_rollout_ref.rollout.gpu_memory_utilization=${ROLLOUT_GPU_MEM_UTIL}
+    actor_rollout_ref.rollout.n=${ROLLOUT_N}
+    actor_rollout_ref.rollout.val_kwargs.top_p=1.0
+    actor_rollout_ref.rollout.val_kwargs.top_k=-1
+    actor_rollout_ref.rollout.val_kwargs.temperature=1.0
+    actor_rollout_ref.rollout.val_kwargs.n=${ROLLOUT_VAL_N}
+    actor_rollout_ref.rollout.log_prob_use_dynamic_bsz=True
+    actor_rollout_ref.rollout.log_prob_max_token_len_per_gpu=${PPO_MAX_TOKEN_LEN_PER_GPU}
+)
+
+REF=(
+    actor_rollout_ref.ref.log_prob_use_dynamic_bsz=True
+    actor_rollout_ref.ref.log_prob_max_token_len_per_gpu=${PPO_MAX_TOKEN_LEN_PER_GPU}
+    actor_rollout_ref.ref.fsdp_config.param_offload=True
+    actor_rollout_ref.ref.fsdp_config.dtype=${DTYPE}
+)
+
+CRITIC=(
+    critic.model.path="$CRITIC_MODEL_PATH"
+    critic.model.use_remove_padding=True
+    critic.model.enable_gradient_checkpointing=True
+    critic.optim.lr=${CRITIC_LR}
+    critic.use_dynamic_bsz=True
+    critic.ppo_max_token_len_per_gpu=${PPO_MAX_TOKEN_LEN_PER_GPU}
+    critic.fsdp.param_offload=True
+    critic.fsdp.optimizer_offload=True
+    critic.fsdp.dtype=${DTYPE}
+)
+
+# Frozen local rubric judge, served as a generative LLM judge on its own resource pool.
+REWARD=(
+    reward.reward_manager.name=rubric_judge
+    reward.reward_model.enable=True
+    reward.reward_model.mode=rubric_judge
+    reward.reward_model.enable_resource_pool=False
+    reward.reward_model.model_path="$JUDGE_MODEL"
+    reward.reward_model.n_gpus_per_node="$JUDGE_GPUS_PER_NODE"
+    reward.reward_model.nnodes="$NNODES"
+    reward.reward_model.rollout.name=vllm
+    reward.reward_model.rollout.dtype=${DTYPE}
+    reward.reward_model.rollout.prompt_length=${PPO_MAX_TOKEN_LEN_PER_GPU}
+    reward.reward_model.rollout.response_length=4000
+    reward.reward_model.rollout.max_model_len=16384
+    reward.reward_model.rollout.tensor_model_parallel_size="$JUDGE_GPUS_PER_NODE"
+    reward.reward_model.rollout.temperature=0.0
+    reward.reward_model.rollout.do_sample=False
+)
+
+TRAINER=(
+    trainer.balance_batch=True
+    trainer.critic_warmup=15
+    trainer.log_val_generations=1
+    trainer.logger='["console","wandb"]'
+    trainer.project_name=${PROJECT_NAME}
+    trainer.experiment_name=${EXPERIMENT_NAME}
+    trainer.n_gpus_per_node=${n_devices_per_node}
+    trainer.nnodes=${NNODES}
+    trainer.save_freq=${SAVE_FREQ}
+    trainer.test_freq=${TEST_FREQ}
+    trainer.total_epochs=${TOTAL_EPOCHS}
+    trainer.default_local_dir=${CKPTS_DIR}
+)
+
+########################### launch ###########################
 python3 -m verl.trainer.main_ppo \
-  algorithm.adv_estimator=gae \
-  data.train_files="$DATA_DIR/train.parquet" \
-  data.val_files="$DATA_DIR/test.parquet" \
-  data.prompt_critic_key=prompt_critic \
-  reward.reward_manager.name=rubric_judge \
-  reward.reward_model.enable=True \
-  reward.reward_model.mode=rubric_judge \
-  reward.reward_model.enable_resource_pool=True \
-  reward.reward_model.model_path="$JUDGE_MODEL" \
-  reward.reward_model.n_gpus_per_node="$JUDGE_GPUS_PER_NODE" \
-  reward.reward_model.nnodes="$NNODES" \
-  reward.reward_model.rollout.name=vllm \
-  reward.reward_model.rollout.tensor_model_parallel_size="$JUDGE_GPUS_PER_NODE" \
-  reward.reward_model.rollout.temperature=0.0 \
-  reward.reward_model.rollout.do_sample=False \
-  actor_rollout_ref.model.path="$POLICY_MODEL" \
-  critic.model.path="$POLICY_MODEL" \
-  trainer.n_gpus_per_node="$NGPUS_PER_NODE" \
-  trainer.nnodes="$NNODES" \
-  "$@"
+    "${DATA[@]}" \
+    "${MODEL[@]}" \
+    "${ACTOR[@]}" \
+    "${ROLLOUT[@]}" \
+    "${REF[@]}" \
+    "${CRITIC[@]}" \
+    "${REWARD[@]}" \
+    "${TRAINER[@]}" \
+    "$@"

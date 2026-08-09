@@ -23,6 +23,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 import re
 from collections.abc import Iterable
 from typing import Any
@@ -33,8 +35,11 @@ from verl import DataProto
 from verl.experimental.reward_loop.reward_manager import register
 from verl.experimental.reward_loop.reward_manager.base import RewardManagerBase
 
+logger = logging.getLogger(__file__)
+logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
-_NUMBERED_CRITERION = re.compile(r"(?m)^\s*(?:\d+\s*[.)]|[-*])\s+")
+
+_NUMBERED_CRITERION = re.compile(r"(?m)(?:^|(?<=\]))\s*(?:\d+\s*[.)]|[-*])\s+")
 
 
 def _category(value: Any) -> str:
@@ -88,6 +93,7 @@ def _extract_json(text: str) -> dict[str, Any]:
     try:
         value, _ = json.JSONDecoder().raw_decode(candidate)
     except json.JSONDecodeError as exc:
+        logger.warning(f"invalid json: {candidate}")
         raise ValueError("judge response does not contain a valid JSON object") from exc
     if not isinstance(value, dict):
         raise ValueError("judge response JSON must be an object")
@@ -102,15 +108,22 @@ def parse_judge_response(text: str, criteria: list[dict[str, Any]]) -> list[dict
         raise ValueError("judge response must contain a 'criteria' list")
     by_id = {}
     for verdict in verdicts:
-        if not isinstance(verdict, dict) or not isinstance(verdict.get("id"), int):
-            raise ValueError("every judge verdict must be an object with an integer id")
+        if not isinstance(verdict, dict):
+            raise ValueError(f"every judge verdict must be a dict: {verdict}")
+        verdict_id = verdict.get("id")
+        if not isinstance(verdict_id, int):
+            if isinstance(verdict_id, str) and verdict_id.strip().lstrip("-").isdigit():
+                verdict_id = int(verdict_id)
+            else:
+                raise ValueError(f"every judge verdict must be an object with an integer id: {verdict}")
         if not isinstance(verdict.get("met"), bool):
             raise ValueError("every judge verdict must contain boolean 'met'")
-        if verdict["id"] in by_id:
+        if verdict_id in by_id:
             raise ValueError("judge response contains duplicate criterion ids")
-        by_id[verdict["id"]] = verdict
+        by_id[verdict_id] = verdict
     expected_ids = {criterion["id"] for criterion in criteria}
     if set(by_id) != expected_ids:
+        logger.warning(f"not matched: {set(by_id)} - {expected_ids}")
         raise ValueError("judge verdict ids do not exactly match the supplied rubric criteria")
     return [
         {
@@ -184,16 +197,16 @@ class RubricJudgeRewardManager(RewardManagerBase):
             {
                 "role": "system",
                 "content": (
-                    "You are a precise rubric evaluator. Judge the response only against the supplied criteria. "
+                    "You are a precise rubric evaluator. Judge the response only against the supplied criteria, which are enclosed within <rubrics>...</rubrics> tags. "
+                    "Include one verdict for every criterion and do not add criteria.\n"
                     "Return JSON only, with this exact schema: "
-                    '{"criteria":[{"id":1,"met":true,"rationale":"brief reason"}]}. '
-                    "Include one verdict for every criterion and do not add criteria."
+                    '{"criteria":[{"id":rubirc_index,"met":true/false}]}.'
                 ),
             },
             {
                 "role": "user",
-                "content": f"<prompt>\n{prompt}\n</prompt>\n<response>\n{response}\n</response>\n"
-                f"<rubrics>\n{criteria_text}\n</rubrics>",
+                # "content": f"<prompt>\n{prompt}\n</prompt>\n<rubrics>\n{criteria_text}\n</rubrics>\n<response>\n{response}\n</response>",
+                "content": f"<prompt>\n{prompt}\n</prompt>\n<response>\n{response}\n</response>\n<rubrics>\n{criteria_text}\n</rubrics>"
             },
         ]
 
@@ -213,7 +226,12 @@ class RubricJudgeRewardManager(RewardManagerBase):
         try:
             content = payload["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise ValueError("reward model returned an invalid chat-completions payload") from exc
+            # Surface the actual payload so a malformed response (e.g. the reward
+            # router forwarding a truncated/non-JSON body from an overloaded worker)
+            # is debuggable from the raised error instead of needing ad-hoc prints.
+            raise ValueError(
+                f"reward model returned an invalid chat-completions payload: {payload!r}"
+            ) from exc
         if not isinstance(content, str):
             raise ValueError("reward model returned a non-text judge response")
         return content
@@ -237,6 +255,7 @@ class RubricJudgeRewardManager(RewardManagerBase):
         for attempt in range(self.judge_config.judge_max_retries + 1):
             try:
                 raw_judgment = await self._chat_complete(messages)
+                # logger.debug(f"criteria: {criteria}. judge: {raw_judgment}")
                 verdicts = parse_judge_response(raw_judgment, criteria)
                 components = aggregate_verdicts(
                     verdicts,
@@ -247,12 +266,18 @@ class RubricJudgeRewardManager(RewardManagerBase):
                     "reward_score": components["score"],
                     "reward_extra_info": {
                         **components,
-                        "rubric_verdicts": verdicts,
-                        "rubric_judge_raw": raw_judgment,
-                        "rubric_judge_status": "ok",
+                        # "rubric_verdicts": verdicts,
+                        # "rubric_judge_raw": raw_judgment,
+                        # "rubric_judge_status": "ok",
                     },
                 }
             except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+                logger.warning(
+                    "rubric judge request failed (attempt %d/%d): %s",
+                    attempt + 1,
+                    self.judge_config.judge_max_retries + 1,
+                    exc,
+                )
                 last_error = exc
                 if attempt < self.judge_config.judge_max_retries:
                     await asyncio.sleep(2**attempt)
@@ -263,8 +288,8 @@ class RubricJudgeRewardManager(RewardManagerBase):
                 "score": 0.0,
                 "rubric_hard_reward": 0.0,
                 "rubric_principle_reward": 0.0,
-                "rubric_verdicts": [],
-                "rubric_judge_raw": raw_judgment,
-                "rubric_judge_status": f"fallback: {last_error}",
+                # "rubric_verdicts": [],
+                # "rubric_judge_raw": raw_judgment,
+                # "rubric_judge_status": f"fallback: {last_error}",
             },
         }

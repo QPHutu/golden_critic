@@ -34,10 +34,57 @@ def test_normalize_openrubrics_text_and_aggregate_components():
     }
 
 
+def test_normalize_rubrics_inline_numbered_without_newlines():
+    # Some rubric sources emit every criterion on a single line/paragraph, with each
+    # numbering immediately following the previous criterion's category tag instead of
+    # starting a new line (e.g. "... [Hard Rule] 2. ..."). This must still be split into
+    # one criterion per number instead of collapsing into a single giant criterion.
+    criteria = normalize_rubrics(
+        "1. The answer is in English. [Hard Rule] 2. The answer is concise. [Principle] "
+        "3. The answer cites a source. [Principle]"
+    )
+    assert [(item["id"], item["category"]) for item in criteria] == [
+        (1, "hard_rule"),
+        (2, "principle"),
+        (3, "principle"),
+    ]
+    assert criteria[0]["criterion"] == "The answer is in English. [Hard Rule]"
+    assert criteria[1]["criterion"] == "The answer is concise. [Principle]"
+    assert criteria[2]["criterion"] == "The answer cites a source. [Principle]"
+
+
+def test_normalize_rubrics_bullet_list_still_splits_per_line():
+    criteria = normalize_rubrics("- Be correct. [Hard Rule]\n- Be concise. [Principle]")
+    assert [(item["id"], item["category"]) for item in criteria] == [(1, "hard_rule"), (2, "principle")]
+
+
+def test_normalize_rubrics_plain_text_without_numbering_stays_single_criterion():
+    criteria = normalize_rubrics("Be correct and cite pi as roughly 3.14 when relevant. [Hard Rule]")
+    assert len(criteria) == 1
+    assert criteria[0]["criterion"] == "Be correct and cite pi as roughly 3.14 when relevant. [Hard Rule]"
+
+
 def test_parse_judge_response_requires_exact_criterion_ids():
     criteria = normalize_rubrics("1. Be correct. [Hard Rule]\n2. Be concise. [Principle]")
     with pytest.raises(ValueError, match="do not exactly match"):
         parse_judge_response('{"criteria": [{"id": 1, "met": true}]}', criteria)
+
+
+def test_parse_judge_response_accepts_stringified_integer_ids():
+    # Some judge models emit ids as strings (e.g. {"id": "1", ...}) despite the schema
+    # asking for integers. A string that unambiguously represents an int should still
+    # be accepted rather than rejected as malformed.
+    criteria = normalize_rubrics("1. Be correct. [Hard Rule]\n2. Be concise. [Principle]")
+    verdicts = parse_judge_response(
+        '{"criteria": [{"id": "1", "met": true}, {"id": "2", "met": false}]}', criteria
+    )
+    assert [(v["id"], v["met"]) for v in verdicts] == [(1, True), (2, False)]
+
+
+def test_parse_judge_response_rejects_non_numeric_string_ids():
+    criteria = normalize_rubrics("1. Be correct. [Hard Rule]")
+    with pytest.raises(ValueError, match="integer id"):
+        parse_judge_response('{"criteria": [{"id": "one", "met": true}]}', criteria)
 
 
 def _sample() -> DataProto:
@@ -49,6 +96,23 @@ def _sample() -> DataProto:
         non_tensors={
             "raw_prompt": [[{"role": "user", "content": "Write a haiku."}]],
             "reward_model": [{"rubrics": "1. Use three lines. [Hard Rule]\n2. Be vivid. [Principle]"}],
+        },
+    )
+
+
+def _sample_with_inline_rubrics() -> DataProto:
+    return DataProto.from_dict(
+        tensors={
+            "responses": torch.tensor([[11, 12, 0]]),
+            "attention_mask": torch.tensor([[1, 1, 1, 1, 0]]),
+        },
+        non_tensors={
+            "raw_prompt": [[{"role": "user", "content": "Write a haiku."}]],
+            "reward_model": [
+                {
+                    "rubrics": "1. Use three lines. [Hard Rule] 2. Be vivid. [Principle]",
+                }
+            ],
         },
     )
 
@@ -74,5 +138,35 @@ def test_rubric_judge_manager_returns_gdpo_components_without_http():
         assert result["reward_extra_info"]["rubric_hard_reward"] == 1.0
         assert result["reward_extra_info"]["rubric_principle_reward"] == 0.0
         assert result["reward_extra_info"]["rubric_judge_status"] == "ok"
+
+    asyncio.run(run())
+
+
+def test_rubric_judge_manager_handles_inline_rubrics_without_newlines():
+    # Regression test: when rubrics arrive as a single line/paragraph with each numbering
+    # glued to the previous criterion's category tag (no newline between criteria), the
+    # manager must still see two distinct criteria. If normalize_rubrics regresses to
+    # collapsing them into one, the judge's two verdict ids (1 and 2) would no longer match
+    # the single parsed criterion id, parse_judge_response would raise, and run_single would
+    # fall back to a reward_score of 0.0 instead of 0.5.
+    async def run():
+        manager = object.__new__(RubricJudgeRewardManager)
+        manager.loop = asyncio.get_running_loop()
+        manager.tokenizer = SimpleNamespace(decode=lambda token_ids, skip_special_tokens: "a vivid haiku")
+        manager.judge_config = SimpleNamespace(
+            judge_max_retries=0,
+            judge_hard_rule_weight=1.0,
+            judge_principle_weight=1.0,
+        )
+
+        async def fake_chat_complete(messages):
+            assert "Write a haiku." in messages[1]["content"]
+            return '{"criteria": [{"id": 1, "met": true}, {"id": 2, "met": false}]}'
+
+        manager._chat_complete = fake_chat_complete
+        result = await manager.run_single(_sample_with_inline_rubrics())
+        assert result["reward_score"] == 0.5
+        assert result["reward_extra_info"]["rubric_hard_reward"] == 1.0
+        assert result["reward_extra_info"]["rubric_principle_reward"] == 0.0
 
     asyncio.run(run())

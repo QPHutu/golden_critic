@@ -349,10 +349,11 @@ class FSDPEngine(BaseEngine):
             reduce_dtype = PrecisionType.to_dtype(mixed_precision_config.get("reduce_dtype", "fp32"))
             buffer_dtype = PrecisionType.to_dtype(mixed_precision_config.get("buffer_dtype", "fp32"))
         else:
-            param_dtype = torch.bfloat16
+            param_dtype = PrecisionType.to_dtype(self.engine_config.dtype)
             reduce_dtype = torch.float32
             buffer_dtype = torch.float32
 
+        print(f"fsdp param dtype {param_dtype}")
         mixed_precision = MixedPrecision(param_dtype=param_dtype, reduce_dtype=reduce_dtype, buffer_dtype=buffer_dtype)
 
         self._autocast_dtype = param_dtype

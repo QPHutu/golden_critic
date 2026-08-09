@@ -38,7 +38,7 @@ reward_model:
   # ``discriminative`` preserves the existing reward-model behavior.
   # ``rubric_judge`` serves this frozen model as a generative LLM judge.
   mode: discriminative
-  judge_max_tokens: 2048
+  judge_max_tokens: 4000
   judge_temperature: 0.0
   judge_timeout: 120.0
   judge_max_retries: 2
@@ -48,8 +48,8 @@ reward_model:
     _target_: verl.workers.config.RolloutConfig
     name: ???
     dtype: bfloat16
-    gpu_memory_utilization: 0.5
-    enforce_eager: true
+    gpu_memory_utilization: 0.8
+    enforce_eager: false
     cudagraph_capture_sizes: null
     free_cache_engine: true
     data_parallel_size: 1

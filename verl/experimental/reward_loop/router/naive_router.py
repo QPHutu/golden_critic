@@ -32,20 +32,29 @@ logger.setLevel(os.getenv("VERL_LOGGING_LEVEL", "WARN"))
 
 
 async def _read_async_response(resp: aiohttp.ClientResponse) -> dict[str, Any]:
-    if resp.status == 204 or (resp.content_length == 0):
+    if resp.status == 204:
         return {}
+
+    # A 2xx status with an empty or non-JSON body is not a legitimate response for
+    # any endpoint this router proxies (classify / completions / chat / embeddings) —
+    # it means the worker died mid-response or returned a truncated payload. Raise so
+    # the retry loop below (and ultimately the caller's own retry-on-error logic)
+    # treats it as a failure instead of forwarding a 200 that silently lacks the
+    # fields callers expect (e.g. "choices").
+    if resp.content_length == 0:
+        raise RuntimeError(f"worker at {resp.url} returned an empty body with status {resp.status}")
 
     try:
         return await resp.json(content_type=None)
-    except Exception:
+    except Exception as exc:
         try:
             text = await resp.text()
         except Exception:
-            return {}
-        return {
-            "content_type": (resp.headers.get("Content-Type") or ""),
-            "text": text,
-        }
+            text = "<unreadable body>"
+        raise RuntimeError(
+            f"worker at {resp.url} returned a non-JSON response (status={resp.status}, "
+            f"content_type={resp.headers.get('Content-Type')!r}): {text[:500]!r}"
+        ) from exc
 
 
 def launch_router_process(

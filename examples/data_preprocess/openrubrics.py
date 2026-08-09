@@ -23,11 +23,17 @@ def make_row(example, index):
     prompt_critic = [
         {
             "role": "system",
-            "content": "You are a value critic. Use the following golden rubric as privileged training context. "
-            "Do not treat it as part of the user's request.\n<golden_rubric>\n"
-            f"{rubric}\n</golden_rubric>",
+            "content": (
+                "You are a precise rubric evaluator. Judge the response only against the supplied criteria, which are enclosed within <rubrics>...</rubrics> tags. "
+                # "Return JSON only, with this exact schema: "
+                # '{"criteria":[{"id":1,"met":true,"rationale":"brief reason"}]}. '
+                "Include one verdict for every criterion and do not add criteria."
+            ),
         },
-        *prompt,
+        {
+            "role": "user",
+            "content": f"<prompt>\n{instruction}\n</prompt>\n<rubrics>\n{rubric}\n</rubrics>\n"
+        },
     ]
     return {
         "data_source": "OpenRubrics/OpenRubrics",
