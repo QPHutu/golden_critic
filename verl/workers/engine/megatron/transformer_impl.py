@@ -1047,4 +1047,5 @@ class MegatronEngineWithValueHead(MegatronEngineWithLMHead):
         return output, partial(postprocess_micro_batch_func, data=batch)
 
     def prepare_model_outputs(self, output: dict | torch.Tensor, data: TensorDict):
+        output = torch.atan(output) * (2.0 / torch.pi)  # (-1, 1)
         return {"values": output}
