@@ -59,6 +59,8 @@ AGG_MODE=${AGG_MODE:-"seq-mean-token-sum"}
 LAM=${LAM:-0.4}
 ADV_ESTIMATOR=${ADV_ESTIMATOR:-"lagae"}
 
+SEED=${SEED:-null}
+
 TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-512}
 PPO_MINI_BATCH_SIZE=${PPO_MINI_BATCH_SIZE:-128}
 MAX_PROMPT_LENGTH=${MAX_PROMPT_LENGTH:-4000}
@@ -72,7 +74,7 @@ if [[ $ADV_ESTIMATOR == "grpo" ]]; then
 fi
 
 PROJECT_NAME=${PROJECT_NAME:-verl_ppo_moe}
-EXPERIMENT_NAME=${EXPERIMENT_NAME:-${CRITIC_KEY}_${ADV_ESTIMATOR}_Lam${LAM}_${ALGO}_${AGG_MODE}_$(date +%Y%m%d_%H%M)}
+EXPERIMENT_NAME=${EXPERIMENT_NAME:-${SEED}_${CRITIC_KEY}_${ADV_ESTIMATOR}_Lam${LAM}_${ALGO}_${AGG_MODE}_$(date +%Y%m%d_%H%M)}
 
 # GSM8K_TRAIN_FILE=${GSM8K_TRAIN_FILE:-$HOME/data/gsm8k/train.parquet}
 # GSM8K_TEST_FILE=${GSM8K_TEST_FILE:-$HOME/data/gsm8k/test.parquet}
@@ -108,6 +110,7 @@ DATA=(
     data.max_response_length=${MAX_RESPONSE_LENGTH}
     data.filter_overlong_prompts=True
     data.truncation='error'
+    data.seed=${SEED}
 )
 
 MODEL=(
